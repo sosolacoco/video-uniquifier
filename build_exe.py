@@ -31,24 +31,43 @@ SEP = os.pathsep  # ';' на Windows — разделитель src/dst в --add
 
 
 def find_binary(name: str) -> str | None:
-    """Ищет name.exe: сначала в PATH, затем в типичных местах рядом с проектом."""
+    """
+    Ищет name.exe. Приоритет:
+      1) локальная папка ffmpeg_bin рядом со скриптом (если положили туда);
+      2) PATH;
+      3) поиск в типичных местах — из нескольких сборок берём САМУЮ ЛЁГКУЮ
+         (essentials меньше full, папка exe получится компактнее).
+    """
+    local = HERE / "ffmpeg_bin" / f"{name}.exe"
+    if local.exists():
+        return str(local)
+
     p = shutil.which(name)
     if p:
         return p
+
     search_roots = [HERE, HERE.parent, HERE.parent / "ffmpeg",
                     Path("C:/ffmpeg/bin"), Path("C:/ffmpeg")]
+    candidates = []
     for root in search_roots:
         if not root.exists():
             continue
         try:
-            for c in root.rglob(f"{name}.exe"):
-                return str(c)
+            candidates.extend(root.rglob(f"{name}.exe"))
         except OSError:
             continue
-    return None
+    if not candidates:
+        return None
+    return str(min(candidates, key=lambda c: c.stat().st_size))
 
 
 def main() -> int:
+    import argparse
+    ap = argparse.ArgumentParser(description="Сборка VideoUniquifier.exe")
+    ap.add_argument("--name", default="VideoUniquifier",
+                    help="Имя exe (напр. VideoUniquifier_Lite)")
+    opts = ap.parse_args()
+
     # Убедимся, что PyInstaller установлен.
     try:
         import PyInstaller  # noqa: F401
@@ -62,7 +81,7 @@ def main() -> int:
 
     args = [
         sys.executable, "-m", "PyInstaller",
-        "--onefile", "--noconsole", "--name", "VideoUniquifier",
+        "--onefile", "--noconsole", "--name", opts.name,
         "--add-data", f"{HERE / 'video_uniquifier.py'}{SEP}.",
         "--add-data", f"{HERE / 'generate_dots.py'}{SEP}.",
     ]
@@ -85,7 +104,7 @@ def main() -> int:
     print("\nЗапускаю сборку…\n")
     r = subprocess.run(args)
     if r.returncode == 0:
-        exe = HERE / "dist" / "VideoUniquifier.exe"
+        exe = HERE / "dist" / f"{opts.name}.exe"
         print("\n===========================================")
         print(f"ГОТОВО: {exe}")
         if ffmpeg and ffprobe:

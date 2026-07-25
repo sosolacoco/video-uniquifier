@@ -46,6 +46,9 @@ build/
 dist/
 *.spec
 
+# Локальные бинарники ffmpeg для сборки exe
+ffmpeg_bin/
+
 # Временные папки проверок
 _cmp/
 _ver/
