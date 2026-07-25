@@ -6,6 +6,13 @@ audio_tracks/*
 !output_videos/.gitkeep
 !audio_tracks/.gitkeep
 
+# Архивы (могут содержать личный контент) — не публиковать
+*.7z
+*.zip
+*.rar
+*.tar
+*.gz
+
 # Любые видео/аудио на всякий случай (кроме PNG-оверлеев)
 *.mp4
 *.mov

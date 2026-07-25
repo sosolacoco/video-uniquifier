@@ -16,6 +16,7 @@ video_uniquifier_gui.py
 from __future__ import annotations
 
 import queue
+import shutil
 import sys
 import threading
 import traceback
@@ -50,13 +51,53 @@ def bundled(rel: str) -> Path:
 
 
 def default_binary(name: str) -> str:
-    """Встроенный ffmpeg/ffprobe (если вшит в exe или лежит рядом), иначе — из PATH."""
+    """Встроенный ffmpeg/ffprobe: сначала рядом с exe (стабильно), затем из бандла, иначе PATH."""
     if FROZEN:
-        for cand in (Path(getattr(sys, "_MEIPASS", "")) / f"{name}.exe",
-                     app_dir() / f"{name}.exe"):
+        for cand in (app_dir() / f"{name}.exe",
+                     Path(getattr(sys, "_MEIPASS", "")) / f"{name}.exe"):
             if cand.exists():
                 return str(cand)
     return name
+
+
+def prepare_runtime() -> None:
+    """
+    Готовит рабочее окружение рядом с приложением:
+      * создаёт папки input_videos / output_videos / audio_tracks / overlays;
+      * в собранном exe — распаковывает встроенные FFmpeg и фейк-точки в стабильные
+        пути рядом с exe (иначе они лежат во временной _MEIPASS, которая недоступна
+        дочерним процессам обработки — из-за этого FFmpeg «не находился»).
+    """
+    base = app_dir()
+    for sub in ("input_videos", "output_videos", "audio_tracks", "overlays"):
+        try:
+            (base / sub).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+    if not FROZEN:
+        return
+
+    mei = Path(getattr(sys, "_MEIPASS", ""))
+    # Фейк-точки -> overlays рядом с exe.
+    src_ov = mei / "overlays"
+    if src_ov.is_dir():
+        for png in src_ov.glob("*.png"):
+            dst = base / "overlays" / png.name
+            if not dst.exists():
+                try:
+                    shutil.copy2(png, dst)
+                except OSError:
+                    pass
+    # FFmpeg/ffprobe -> рядом с exe (стабильный путь для subprocess в воркерах).
+    for name in ("ffmpeg.exe", "ffprobe.exe"):
+        src = mei / name
+        dst = base / name
+        if src.exists() and not dst.exists():
+            try:
+                shutil.copy2(src, dst)
+            except OSError:
+                pass
 
 # ---- тёмная палитра ----
 BG = "#1f1f27"
@@ -119,15 +160,18 @@ class App:
         self.worker: threading.Thread | None = None
         self._closing = False
 
+        # Создаём папки и распаковываем встроенные FFmpeg/точки рядом с приложением.
+        prepare_runtime()
+
         d = engine.Config()
         base = app_dir()
 
         # ---- переменные ----
-        # Рабочие папки — рядом с приложением (пишутся); оверлеи — вшитые в exe, если есть.
+        # Рабочие папки и точки — рядом с приложением (стабильные пути).
         self.var_input = tk.StringVar(value=str(base / d.input_dir))
         self.var_output = tk.StringVar(value=str(base / d.output_dir))
         self.var_audiodir = tk.StringVar(value=str(base / d.audio_dir))
-        self.var_overlaydir = tk.StringVar(value=str(bundled("overlays")))
+        self.var_overlaydir = tk.StringVar(value=str(base / "overlays"))
 
         self.var_copies = tk.IntVar(value=d.copies_per_video)
         self.var_audio = tk.StringVar(value=d.audio_mode)
@@ -175,6 +219,7 @@ class App:
 
         # Подхватываем сохранённые настройки (папки и т.д.) до построения интерфейса.
         self._load_settings()
+        self._fixup_binaries()
 
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -212,6 +257,13 @@ class App:
                 json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:
             pass
+
+    def _fixup_binaries(self) -> None:
+        """Сбросить путь к ffmpeg/ffprobe на актуальный, если сохранённый указывает в никуда."""
+        for var, name in ((self.var_ffmpeg, "ffmpeg"), (self.var_ffprobe, "ffprobe")):
+            val = var.get().strip()
+            if val and ("/" in val or "\\" in val) and not Path(val).exists():
+                var.set(default_binary(name))
 
     def _on_close(self) -> None:
         self._closing = True
