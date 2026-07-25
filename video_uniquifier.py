@@ -64,6 +64,11 @@ except ImportError:  # pragma: no cover — заглушка, если tqdm не
         return iterable if iterable is not None else _DummyBar()
 
 
+# Флаг «не показывать окно консоли» для дочерних процессов ffmpeg/ffprobe (Windows).
+# Без него при обработке на экране мигают чёрные окна cmd.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+
+
 # ---------------------------------------------------------------------------
 # КОНФИГ (значения по умолчанию; всё переопределяется аргументами CLI)
 # ---------------------------------------------------------------------------
@@ -202,7 +207,7 @@ def ffprobe_duration(ffprobe: str, path: Path) -> Optional[float]:
         out = subprocess.run(
             [ffprobe, "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=60, creationflags=_NO_WINDOW,
         )
         val = out.stdout.strip()
         return float(val) if val and val != "N/A" else None
@@ -218,7 +223,7 @@ def ffprobe_dimensions(ffprobe: str, path: Path) -> Optional[Tuple[int, int]]:
             [ffprobe, "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=width,height",
              "-of", "json", str(path)],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=60, creationflags=_NO_WINDOW,
         )
         data = json.loads(out.stdout or "{}")
         streams = data.get("streams") or []
@@ -234,7 +239,7 @@ def has_audio_stream(ffprobe: str, path: Path) -> bool:
         out = subprocess.run(
             [ffprobe, "-v", "error", "-select_streams", "a",
              "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=60, creationflags=_NO_WINDOW,
         )
         return bool(out.stdout.strip())
     except Exception:  # noqa: BLE001
@@ -558,7 +563,8 @@ def process_task(args: Tuple[Config, Task,
                               overlays, audio_tracks, rng)
         cmd = build_ffmpeg_cmd(cfg, task.src, task.dst, params, task.keep_audio_possible)
 
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
+                              creationflags=_NO_WINDOW)
         if proc.returncode != 0:
             # Чистим неполный файл.
             if task.dst.exists():
