@@ -2,7 +2,7 @@
 cd /d "%~dp0"
 
 echo ============================================
-echo  Building VideoUniquifier.exe (PyInstaller)
+echo  Building autonomous VideoUniquifier.exe
 echo ============================================
 echo.
 
@@ -16,22 +16,14 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-%PY% -m pip install --upgrade pyinstaller tqdm
-if %errorlevel% neq 0 goto err
-
-%PY% -m PyInstaller --onefile --noconsole --name VideoUniquifier --add-data "video_uniquifier.py;." video_uniquifier_gui.py
-if %errorlevel% neq 0 goto err
+%PY% build_exe.py
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERROR] Build failed. See messages above.
+    pause
+    exit /b 1
+)
 
 echo.
-echo DONE. File is here:  dist\VideoUniquifier.exe
-echo NOTE: FFmpeg (ffmpeg/ffprobe) must still be installed in the system
-echo       or set its path inside the app fields.
-echo.
+echo Result: dist\VideoUniquifier.exe
 pause
-exit /b 0
-
-:err
-echo.
-echo [ERROR] Build failed. Make sure Python is installed and internet is available.
-pause
-exit /b 1

@@ -16,6 +16,7 @@ video_uniquifier_gui.py
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 import traceback
 from pathlib import Path
@@ -27,6 +28,35 @@ import video_uniquifier as engine
 
 
 APP_TITLE = "Video Uniquifier — уникализация видео"
+SETTINGS_FILE = "video_uniquifier_settings.json"
+
+FROZEN = getattr(sys, "frozen", False)
+
+
+def app_dir() -> Path:
+    """Папка рядом с .exe (в собранном виде) или рядом со скриптом."""
+    if FROZEN:
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def bundled(rel: str) -> Path:
+    """Путь к ресурсу, вшитому в .exe (_MEIPASS), с фолбэком рядом с приложением."""
+    if FROZEN:
+        p = Path(getattr(sys, "_MEIPASS", app_dir())) / rel
+        if p.exists():
+            return p
+    return app_dir() / rel
+
+
+def default_binary(name: str) -> str:
+    """Встроенный ffmpeg/ffprobe (если вшит в exe или лежит рядом), иначе — из PATH."""
+    if FROZEN:
+        for cand in (Path(getattr(sys, "_MEIPASS", "")) / f"{name}.exe",
+                     app_dir() / f"{name}.exe"):
+            if cand.exists():
+                return str(cand)
+    return name
 
 # ---- тёмная палитра ----
 BG = "#1f1f27"
@@ -87,15 +117,17 @@ class App:
         self.msg_queue: "queue.Queue[tuple]" = queue.Queue()
         self.cancel_event = threading.Event()
         self.worker: threading.Thread | None = None
+        self._closing = False
 
         d = engine.Config()
-        base = Path(__file__).resolve().parent
+        base = app_dir()
 
         # ---- переменные ----
+        # Рабочие папки — рядом с приложением (пишутся); оверлеи — вшитые в exe, если есть.
         self.var_input = tk.StringVar(value=str(base / d.input_dir))
         self.var_output = tk.StringVar(value=str(base / d.output_dir))
         self.var_audiodir = tk.StringVar(value=str(base / d.audio_dir))
-        self.var_overlaydir = tk.StringVar(value=str(base / d.overlay_dir))
+        self.var_overlaydir = tk.StringVar(value=str(bundled("overlays")))
 
         self.var_copies = tk.IntVar(value=d.copies_per_video)
         self.var_audio = tk.StringVar(value=d.audio_mode)
@@ -138,11 +170,57 @@ class App:
         self.var_fx_zoom = tk.BooleanVar(value=d.fx_zoom)
         self.var_zoom_max = tk.DoubleVar(value=d.fx_zoom_max)
 
-        self.var_ffmpeg = tk.StringVar(value=d.ffmpeg)
-        self.var_ffprobe = tk.StringVar(value=d.ffprobe)
+        self.var_ffmpeg = tk.StringVar(value=default_binary("ffmpeg"))
+        self.var_ffprobe = tk.StringVar(value=default_binary("ffprobe"))
+
+        # Подхватываем сохранённые настройки (папки и т.д.) до построения интерфейса.
+        self._load_settings()
 
         self._build_ui()
-        self.root.after(100, self._poll_queue)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._poll_id = self.root.after(100, self._poll_queue)
+
+    # ------------------------------------------------------- память настроек
+    def _all_vars(self) -> dict:
+        return {k: v for k, v in self.__dict__.items()
+                if k.startswith("var_") and isinstance(v, tk.Variable)}
+
+    def _settings_path(self) -> Path:
+        return app_dir() / SETTINGS_FILE
+
+    def _load_settings(self) -> None:
+        import json
+        f = self._settings_path()
+        if not f.exists():
+            return
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        for name, var in self._all_vars().items():
+            if name in data:
+                try:
+                    var.set(data[name])
+                except Exception:  # noqa: BLE001 — битое/несовместимое значение игнорируем
+                    pass
+
+    def _save_settings(self) -> None:
+        import json
+        data = {name: var.get() for name, var in self._all_vars().items()}
+        try:
+            self._settings_path().write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _on_close(self) -> None:
+        self._closing = True
+        try:
+            self.root.after_cancel(self._poll_id)
+        except Exception:  # noqa: BLE001
+            pass
+        self._save_settings()
+        self.root.destroy()
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
@@ -417,6 +495,7 @@ class App:
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("Ошибка настроек", str(e))
             return
+        self._save_settings()   # запоминаем выбранные настройки
         self.cancel_event.clear()
         self._set_running(True)
         self._clear_log()
@@ -448,6 +527,8 @@ class App:
 
     # ----------------------------------------------------- очередь → GUI
     def _poll_queue(self) -> None:
+        if self._closing:
+            return
         try:
             while True:
                 kind, payload = self.msg_queue.get_nowait()
@@ -468,7 +549,7 @@ class App:
                     self.lbl_status.config(text="Остановлено из-за ошибки.")
         except queue.Empty:
             pass
-        self.root.after(100, self._poll_queue)
+        self._poll_id = self.root.after(100, self._poll_queue)
 
     def _finish(self, rc: int) -> None:
         self._set_running(False)
