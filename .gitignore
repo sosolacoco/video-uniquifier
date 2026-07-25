@@ -1,0 +1,46 @@
+# --- Пользовательский контент: НИКОГДА не публиковать ---
+input_videos/*
+output_videos/*
+audio_tracks/*
+!input_videos/.gitkeep
+!output_videos/.gitkeep
+!audio_tracks/.gitkeep
+
+# Любые видео/аудио на всякий случай (кроме PNG-оверлеев)
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.m4v
+*.flv
+*.wmv
+*.mpg
+*.mpeg
+*.mp3
+*.wav
+*.aac
+*.m4a
+*.ogg
+*.flac
+*.opus
+
+# Логи
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Временные папки проверок
+_cmp/
+_ver/
+_in/
+_out/
+*.tmp
