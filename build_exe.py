@@ -82,9 +82,20 @@ def main() -> int:
     args = [
         sys.executable, "-m", "PyInstaller",
         "--onefile", "--noconsole", "--name", opts.name,
+        "--noupx",  # без UPX — меньше ложных срабатываний антивирусов
         "--add-data", f"{HERE / 'video_uniquifier.py'}{SEP}.",
         "--add-data", f"{HERE / 'generate_dots.py'}{SEP}.",
     ]
+
+    # Иконка и метаданные версии — exe выглядит легитимнее (меньше эвристик AV).
+    icon = HERE / "app_icon.ico"
+    if icon.exists():
+        args += ["--icon", str(icon)]
+        print(f"[+] Иконка: {icon.name}")
+    verinfo = HERE / "version_info.txt"
+    if verinfo.exists():
+        args += ["--version-file", str(verinfo)]
+        print(f"[+] Метаданные версии: {verinfo.name}")
 
     overlays = HERE / "overlays"
     if overlays.exists():
